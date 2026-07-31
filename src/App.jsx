@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Upload, TrendingUp, Radio, Loader2, ArrowUpRight, ArrowDownRight, 
   ShieldAlert, Sparkles, PieChart, Home, BarChart3, 
-  ArrowRightLeft, User, RefreshCw, FileText, Sun, Moon, Monitor
+  ArrowRightLeft, User, RefreshCw, FileText, Sun, Moon, Monitor, Lightbulb
 } from 'lucide-react';
 import { extractTextFromPdf } from './utils/pdfExtractor';
 
@@ -14,7 +14,7 @@ export default function App() {
   const [analysis, setAnalysis] = useState(null);
   const [activeTab, setActiveTab] = useState('home');
   
-  // Theme State: localStorage માંથી રીડ કરો, જો ન મળે તો default 'system' રાખો
+  // Theme State: Read from localStorage or default to 'system'
   const [theme, setTheme] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('sharekhan_theme') || 'system';
@@ -22,7 +22,7 @@ export default function App() {
     return 'system';
   });
 
-  // જ્યારે પણ થીમ બદલાય, તેને localStorage માં સેવ કરો
+  // Save theme to localStorage on change
   useEffect(() => {
     localStorage.setItem('sharekhan_theme', theme);
   }, [theme]);
@@ -81,7 +81,7 @@ export default function App() {
       const pdfText = await extractTextFromPdf(file);
 
       if (!pdfText || pdfText.trim().length === 0) {
-        alert("Unable to read PDF content. Please upload a valid PDF.");
+        alert("Unable to read PDF content. Please upload a valid PDF statement.");
         setLoading(false);
         return;
       }
@@ -110,25 +110,32 @@ export default function App() {
       const liveNavs = await fetchLiveNavForFunds(extractedFundNames);
 
       const promptText = `
-        Analyze this PDF statement with live market NAVs and return ONLY a valid JSON object without markdown formatting.
+        Analyze this PDF portfolio statement against current market trends and live NAVs. 
+        Provide an in-depth portfolio rebalancing report including market performance comparisons and specific recommendations on which funds to rebalance/replace for maximum market returns.
+        Return ONLY a valid JSON object without markdown formatting.
 
         Live Market Data: ${JSON.stringify(liveNavs)}
         PDF Content: ${pdfText.substring(0, 3000)}
 
         Return JSON strictly in this format:
         {
-          "investorName": "Name of the account holder/investor extracted from PDF (if not found, extract from filename like 'Prince')",
-          "totalInvested": "Amount",
+          "investorName": "Name of investor from PDF or filename",
+          "totalInvested": "Total Investment Amount",
           "riskLevel": "Low / Medium / High",
-          "replacementOverview": "Brief summary of recommended portfolio rebalancing strategy",
+          "replacementOverview": "Executive summary of the portfolio rebalancing strategy based on current market returns",
+          "rebalancingStrategy": {
+            "currentAssetAllocation": "Current Large/Mid/Small cap or Asset allocation summary",
+            "recommendedAction": "Actionable overall guidance (e.g., Reduce Small Cap exposure by 15% and switch to Flexi Cap)",
+            "expectedImpact": "Potential benefit or return enhancement after rebalancing"
+          },
           "funds": [
             {
               "name": "Fund Name",
-              "pdfValue": "Value",
+              "pdfValue": "Value in PDF",
               "liveNav": "NAV",
-              "impact": "Up" or "Down" or "Stable",
-              "action": "KEEP / CONTINUE SIP" or "REPLACE / REBALANCE",
-              "suggestion": "Detailed explanation of why to keep or replace, with specific target fund recommendations if replacing."
+              "impact": "Up / Down / Stable",
+              "action": "KEEP / CONTINUE SIP / REBALANCE / SWITCH",
+              "suggestion": "Detailed market performance analysis explaining why to keep or replace, with specific target replacement funds if applicable."
             }
           ]
         }
@@ -160,7 +167,7 @@ export default function App() {
 
     } catch (err) {
       console.error('API Error:', err);
-      alert('Error analyzing statement. Please try again.');
+      alert('Error analyzing statement. Please check your API key or network connection.');
     } finally {
       setLoading(false);
     }
@@ -220,8 +227,8 @@ export default function App() {
                   <Upload className="w-6 h-6" />
                 </div>
                 <div>
-                  <h2 className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Upload Statement</h2>
-                  <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Select Sharekhan PDF to analyze live NAVs</p>
+                  <h2 className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Upload Portfolio Statement</h2>
+                  <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload Sharekhan PDF to analyze live NAVs & Rebalance Advice</p>
                 </div>
 
                 <label htmlFor="pdf-upload" className={`border-2 border-dashed transition-all rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer block ${
@@ -232,7 +239,7 @@ export default function App() {
                   <p className="text-xs font-semibold text-emerald-600 truncate max-w-[250px]">
                     {file ? file.name : "Tap to choose PDF File"}
                   </p>
-                  <span className={`text-[10px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Supports official Sharekhan PDF statements</span>
+                  <span className={`text-[10px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Supports official PDF statements</span>
                   <input id="pdf-upload" type="file" accept=".pdf" onChange={handleFileUpload} className="hidden" />
                 </label>
 
@@ -243,7 +250,7 @@ export default function App() {
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 active:scale-95"
                   >
                     {loading ? (
-                      <><Loader2 className="animate-spin h-4 w-4 text-white" /> Analyzing Live Market...</>
+                      <><Loader2 className="animate-spin h-4 w-4 text-white" /> Analyzing Market Trends...</>
                     ) : (
                       <><Sparkles className="w-4 h-4 text-amber-300" /> Generate Live Report</>
                     )}
@@ -281,7 +288,7 @@ export default function App() {
                   isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200'
                 }`}>
                   <BarChart3 className="w-10 h-10 text-slate-400 mx-auto" />
-                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>No PDF statement analyzed yet.</p>
+                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>No statement analyzed yet.</p>
                   <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Go to Home tab and upload a PDF to see analysis.</p>
                   <button 
                     onClick={() => setActiveTab('home')}
@@ -359,14 +366,51 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* NEW SECTION: Smart Market Rebalancing Strategy */}
+                  {analysis.rebalancingStrategy && (
+                    <div className={`border rounded-xl p-3.5 space-y-2.5 ${
+                      isDark ? 'bg-amber-950/20 border-amber-500/30' : 'bg-amber-50/80 border-amber-200'
+                    }`}>
+                      <h3 className="text-xs font-bold text-amber-600 flex items-center gap-1.5">
+                        <Lightbulb className="w-4 h-4 text-amber-500" /> Smart Portfolio Rebalancing Advice
+                      </h3>
+                      
+                      {analysis.rebalancingStrategy.currentAssetAllocation && (
+                        <div className="text-[11px]">
+                          <span className="font-semibold text-amber-700">Allocation State: </span>
+                          <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>
+                            {analysis.rebalancingStrategy.currentAssetAllocation}
+                          </span>
+                        </div>
+                      )}
+
+                      {analysis.rebalancingStrategy.recommendedAction && (
+                        <div className="text-[11px]">
+                          <span className="font-semibold text-amber-700">Recommended Action: </span>
+                          <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>
+                            {analysis.rebalancingStrategy.recommendedAction}
+                          </span>
+                        </div>
+                      )}
+
+                      {analysis.rebalancingStrategy.expectedImpact && (
+                        <div className="text-[11px] p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 font-medium">
+                          ⚡ Expected Result: {analysis.rebalancingStrategy.expectedImpact}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Holdings List */}
                   <div className="space-y-2.5">
                     <h3 className={`text-xs font-bold px-1 ${
                       isDark ? 'text-slate-300' : 'text-slate-700'
-                    }`}>Holdings & Suggestions</h3>
+                    }`}>Holdings & Replacement Recommendations</h3>
 
                     {analysis.funds?.map((fund, index) => {
-                      const isReplace = fund.action?.toUpperCase().includes('REPLACE') || fund.action?.toUpperCase().includes('REBALANCE');
+                      const isReplace = fund.action?.toUpperCase().includes('REBALANCE') || 
+                                        fund.action?.toUpperCase().includes('SWITCH') || 
+                                        fund.action?.toUpperCase().includes('REPLACE');
                       return (
                         <div key={index} className={`border rounded-xl p-3 space-y-2 ${
                           isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-white border-slate-200'
