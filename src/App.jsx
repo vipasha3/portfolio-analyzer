@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { extractTextFromPdf } from './utils/pdfExtractor';
 
-const GROQ_API_KEY = "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";
+const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY;
 
 export default function App() {
   const [file, setFile] = useState(null);
