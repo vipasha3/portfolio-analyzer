@@ -489,14 +489,27 @@ export default function App() {
                               }`}>{fund.name}</h4>
                             </div>
 
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase flex items-center gap-0.5 shrink-0 ${
-                              fund.impact?.toLowerCase() === 'up' 
-                                ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30' 
-                                : 'bg-rose-500/20 text-rose-500 border border-rose-500/30'
-                            }`}>
-                              {fund.impact?.toLowerCase() === 'up' ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                              {fund.impact || 'Market'}
-                            </span>
+                            {/* UPDATED IMPACT BADGE LOGIC */}
+                            {(() => {
+                              const impactVal = fund.impact?.toLowerCase() || '';
+                              let badgeStyle = 'bg-slate-500/20 text-slate-500 border-slate-500/30';
+                              let ImpactIcon = ArrowRightLeft;
+
+                              if (impactVal === 'up') {
+                                badgeStyle = 'bg-emerald-500/20 text-emerald-500 border-emerald-500/30';
+                                ImpactIcon = ArrowUpRight;
+                              } else if (impactVal === 'down') {
+                                badgeStyle = 'bg-rose-500/20 text-rose-500 border-rose-500/30';
+                                ImpactIcon = ArrowDownRight;
+                              }
+
+                              return (
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase flex items-center gap-0.5 shrink-0 border ${badgeStyle}`}>
+                                  <ImpactIcon className="w-3 h-3" />
+                                  {fund.impact || 'Stable'}
+                                </span>
+                              );
+                            })()}
                           </div>
 
                           {/* 3 Column Grid for Invested, Live NAV, and Current Value */}
