@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Upload, TrendingUp, Radio, Loader2, ArrowUpRight, ArrowDownRight, 
-  ShieldAlert, Sparkles, PieChart, Home, BarChart3, 
-  ArrowRightLeft, User, RefreshCw, FileText, Sun, Moon, Monitor, Lightbulb,
-  Zap
+  Sparkles, Home, BarChart3, ArrowRightLeft, User, FileText, Sun, 
+  Moon, Monitor, Lightbulb, Zap
 } from 'lucide-react';
 import { extractTextFromPdf } from './utils/pdfExtractor';
 
@@ -16,7 +15,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [errorMsg, setErrorMsg] = useState('');
   
-  // Theme State
+  // Theme State Setup
   const [theme, setTheme] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('sharekhan_theme') || 'system';
@@ -67,38 +66,98 @@ export default function App() {
     }
   };
 
-  const fetchLiveNavForFunds = async (fundNames) => {
-    let liveDataSummary = [];
-    for (const fundName of fundNames) {
-      if (!fundName || fundName.trim().length < 3) continue;
-      try {
-        const cleanName = fundName.replace(/Direct|Growth|Option|Plan|-/gi, '').trim();
-        const searchRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(cleanName)}`);
-        const searchData = await searchRes.json();
+  // Pure JS Function to Fetch Live NAV, Calculate Totals, and Determine Deterministic Impact
+  const enrichWithRealLiveNAV = async (fundsList) => {
+    let updatedFunds = [];
+    let calculatedTotalCurrentValue = 0;
+    let calculatedTotalInvestedValue = 0;
 
-        if (searchData && searchData.length > 0) {
-          const matchedScheme = searchData.find(s => s.schemeName.toLowerCase().includes('direct') && s.schemeName.toLowerCase().includes('growth')) || searchData[0];
-          
-          const navRes = await fetch(`https://api.mfapi.in/mf/${matchedScheme.schemeCode}`);
-          const navData = await navRes.json();
+    for (const fund of fundsList) {
+      let liveNavVal = "N/A";
+      let navDateStr = "";
+      
+      // Extract numeric invested amount safely
+      const numPdfValue = parseFloat(String(fund.pdfValue || "0").replace(/[^0-9.]/g, '')) || 0;
+      calculatedTotalInvestedValue += numPdfValue;
 
-          if (navData && navData.data && navData.data[0]) {
-            const latest = navData.data[0];
-            liveDataSummary.push({
-              name: fundName,
-              officialName: navData.meta.scheme_name,
-              liveNav: parseFloat(latest.nav),
-              navDate: latest.date
-            });
+      let calculatedCurrentVal = numPdfValue;
+
+      if (fund.name && fund.name.trim().length > 2) {
+        try {
+          // Clean fund name for better search matching
+          let cleanQuery = fund.name
+            .replace(/Direct|Growth|Option|Plan|Reg|Regular|-|\(G\)|\(D\)/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          let searchRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(cleanQuery)}`);
+          let searchData = await searchRes.json();
+
+          // Fallback search with first 2 words if full name search fails
+          if (!searchData || searchData.length === 0) {
+            const firstTwoWords = cleanQuery.split(' ').slice(0, 2).join(' ');
+            searchRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(firstTwoWords)}`);
+            searchData = await searchRes.json();
           }
+
+          if (searchData && searchData.length > 0) {
+            // Priority matching for Direct Growth or Growth scheme
+            const matchedScheme = searchData.find(s => 
+              s.schemeName.toLowerCase().includes('direct') && s.schemeName.toLowerCase().includes('growth')
+            ) || searchData.find(s => 
+              s.schemeName.toLowerCase().includes('growth')
+            ) || searchData[0];
+            
+            const navRes = await fetch(`https://api.mfapi.in/mf/${matchedScheme.schemeCode}`);
+            const navData = await navRes.json();
+
+            if (navData && navData.data && navData.data[0]) {
+              const latest = navData.data[0];
+              liveNavVal = parseFloat(latest.nav).toFixed(2);
+              navDateStr = latest.date;
+
+              const unitsNum = parseFloat(String(fund.units).replace(/,/g, '')) || 0;
+              if (unitsNum > 0) {
+                const totalCurrent = unitsNum * parseFloat(liveNavVal);
+                calculatedCurrentVal = totalCurrent;
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`Error fetching Live NAV for ${fund.name}:`, e);
         }
-      } catch (e) {
-        console.error(`Error fetching NAV for ${fundName}:`, e);
       }
+
+      calculatedTotalCurrentValue += parseFloat(calculatedCurrentVal);
+
+      // Deterministic Impact Calculation in JS (100% Consistent)
+      let deterministicImpact = 'Stable';
+      const diffPercent = numPdfValue > 0 ? ((calculatedCurrentVal - numPdfValue) / numPdfValue) * 100 : 0;
+      
+      if (diffPercent > 0.5) {
+        deterministicImpact = 'Up';
+      } else if (diffPercent < -0.5) {
+        deterministicImpact = 'Down';
+      }
+
+      updatedFunds.push({
+        ...fund,
+        pdfValue: `₹${numPdfValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+        liveNav: liveNavVal,
+        date: navDateStr,
+        currentValue: parseFloat(calculatedCurrentVal).toFixed(2),
+        impact: deterministicImpact // Always accurate based on math
+      });
     }
-    return liveDataSummary;
+
+    return { 
+      updatedFunds, 
+      calculatedTotalCurrentValue: `₹${calculatedTotalCurrentValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+      calculatedTotalInvestedValue: `₹${calculatedTotalInvestedValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+    };
   };
 
+  // Main Handle Analyze Function
   const handleAnalyze = async () => {
     if (!file) return;
 
@@ -106,85 +165,53 @@ export default function App() {
     setErrorMsg('');
 
     try {
+      // 1. Extract text from PDF
       const pdfText = await extractTextFromPdf(file);
 
       if (!pdfText || pdfText.trim().length === 0) {
-        setErrorMsg("Unable to read PDF content. Please upload a valid or unlocked PDF statement.");
+        setErrorMsg("PDF માંથી ડેટા રીડ થઈ શક્યો નથી. કૃપા કરીને ઓરિજિનલ સ્ટેટમેન્ટ અપલોડ કરો.");
         setLoading(false);
         return;
       }
 
-      const extractFundsPrompt = `
-        Extract ONLY Mutual Fund names present in this statement text as a comma-separated list.
-        PDF Content: ${pdfText.substring(0, 3000)}
-      `;
-
-      const fundListRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${GROQ_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [{ role: "user", content: extractFundsPrompt }]
-        })
-      });
-
-      if (!fundListRes.ok) {
-        throw new Error('Failed to fetch fund names from Groq API');
-      }
-
-      const fundListData = await fundListRes.json();
-      const extractedNamesText = fundListData.choices?.[0]?.message?.content || "";
-      const extractedFundNames = extractedNamesText.split(',').map(name => name.trim()).filter(Boolean);
-
-      const liveNavs = await fetchLiveNavForFunds(extractedFundNames);
-
+      // 2. Focused AI Prompt for Data Extraction & Strategy Only
       const promptText = `
-        Analyze this PDF portfolio statement against current market trends and live NAVs. 
-        Calculate the CURRENT VALUE of each fund using total units multiplied by current Live NAV.
+        You are an expert financial portfolio analyst. Extract investment details and strategic suggestions from this PDF Statement.
         
-        CRITICAL REQUIREMENT:
-        1. Calculate exact portfolio allocation percentages for 'allocationState'.
-        2. Give concrete 'recommendedAction' for portfolio rebalancing.
-        3. Quantify 'expectedResult' (e.g. potential volatility reduction or return enhancement).
-        4. For any fund marked for 'REBALANCE', 'SWITCH', or 'REPLACE', suggest a top-performing alternative fund in 'suggestedTargetFund'.
+        PDF Content:
+        ${pdfText.substring(0, 4500)}
 
-        Return ONLY a valid JSON object without markdown formatting.
+        CRITICAL REQUIREMENTS:
+        1. Extract Investor Name and Portfolio Risk Level.
+        2. Extract each Mutual Fund details (Exact Name, Invested Amount for that fund, Units, and Action).
+        3. Action MUST strictly be one of: "CONTINUE SIP", "REBALANCE", "SWITCH".
+        4. Provide overall Strategy Overview & Rebalancing Advice.
+        5. For any fund needing REBALANCE or SWITCH, suggest a high-performing target fund.
 
-        Live Market Data: ${JSON.stringify(liveNavs)}
-        PDF Content: ${pdfText.substring(0, 4000)}
-
-        Return JSON strictly in this format:
+        Return ONLY a raw JSON object without markdown formatting using this JSON schema:
         {
-          "investorName": "Name of investor from PDF",
-          "totalInvested": "Total Investment Amount from PDF statement",
-          "currentTotalValue": "Calculated Current Portfolio Total Value based on live NAVs",
+          "investorName": "Name of investor",
           "riskLevel": "Low / Medium / High",
-          "replacementOverview": "Strategy Overview paragraph explaining overall market alignment and exposure balance",
+          "replacementOverview": "Comprehensive strategy summary explaining market alignment and rebalancing needs.",
           "rebalancingStrategy": {
-            "allocationState": "Detailed breakdown of fund percentages (e.g., 20.05% in Fund A, 59.83% in Fund B...)",
-            "recommendedAction": "Clear advice on reducing or increasing exposure across caps/funds",
-            "expectedResult": "Quantified expected result (e.g. This adjustment could potentially reduce volatility by 5-7%...)"
+            "allocationState": "Current percentage breakdown across asset classes or caps",
+            "recommendedAction": "Actionable instructions for rebalancing",
+            "expectedResult": "Quantified expected outcome (e.g., Risk reduction by 5-8%)"
           },
           "funds": [
             {
-              "name": "Fund Name from PDF",
-              "pdfValue": "Invested Amount from PDF",
-              "units": "Total Units held in PDF",
-              "liveNav": "Live NAV value from provided Live Market Data",
-              "currentValue": "Calculated value (Units * Live NAV)",
-              "date": "Exact NAV Date from provided Live Market Data (e.g. DD-MM-YYYY)",
-              "impact": "Up / Down / Stable",
-              "action": "KEEP / CONTINUE SIP / REBALANCE / SWITCH",
-              "suggestedTargetFund": "Specific fund name to switch into if action is REBALANCE/SWITCH, otherwise null",
-              "suggestion": "Detailed reasoning based on market return and performance."
+              "name": "Exact Mutual Fund Name",
+              "pdfValue": "1000",
+              "units": "50.5",
+              "action": "CONTINUE SIP / REBALANCE / SWITCH",
+              "suggestedTargetFund": "Specific fund name if action is REBALANCE or SWITCH, else null",
+              "suggestion": "Detailed strategic reasoning for this fund."
             }
           ]
         }
       `;
 
+      // 3. Single Groq API Call with temperature: 0 for 100% Deterministic Output
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -193,21 +220,35 @@ export default function App() {
         },
         body: JSON.stringify({
           model: "llama-3.3-70b-versatile",
+          temperature: 0,
           response_format: { type: "json_object" },
           messages: [{ role: "user", content: promptText }]
         })
       });
 
       if (!res.ok) {
-        throw new Error('Failed to analyze portfolio with Groq API');
+        if (res.status === 429) {
+          throw new Error('API Rate Limit Exceeded. Please try again in 30 seconds.');
+        }
+        throw new Error('Failed to analyze portfolio statement.');
       }
 
       const data = await res.json();
       const parsedData = JSON.parse(data.choices[0].message.content);
       
+      // Fallback if Name is missing
       if (!parsedData.investorName || parsedData.investorName.toLowerCase().includes("unknown")) {
-        const nameFromFileName = file.name.split('.')[0].replace(/[^a-zA-Z0-9\s]/g, ' ') || "Investor";
-        parsedData.investorName = nameFromFileName;
+        const fallbackName = file.name.split('.')[0].replace(/[^a-zA-Z0-9\s]/g, ' ') || "Investor";
+        parsedData.investorName = fallbackName;
+      }
+
+      // 4. Pure JS Live NAV Fetching, Deterministic Impact Calculation & Exact Mathematical Totals
+      if (parsedData.funds && parsedData.funds.length > 0) {
+        const { updatedFunds, calculatedTotalCurrentValue, calculatedTotalInvestedValue } = await enrichWithRealLiveNAV(parsedData.funds);
+        
+        parsedData.funds = updatedFunds;
+        parsedData.totalInvested = calculatedTotalInvestedValue;
+        parsedData.currentTotalValue = calculatedTotalCurrentValue;
       }
 
       setAnalysis(parsedData);
@@ -215,7 +256,7 @@ export default function App() {
 
     } catch (err) {
       console.error('API Error:', err);
-      setErrorMsg('Error analyzing statement. Please check your API key or network connection.');
+      setErrorMsg(err.message || 'Error processing request. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -235,7 +276,7 @@ export default function App() {
       
       <div className="w-full max-w-lg mx-auto flex-1 flex flex-col min-h-screen relative pb-20">
         
-        {/* Top Header */}
+        {/* Header Bar */}
         <header className={`sticky top-0 z-50 p-4 flex items-center justify-between shadow-lg backdrop-blur-md transition-colors ${
           isDark ? 'bg-emerald-900/90 text-white' : 'bg-emerald-600 text-white'
         }`}>
@@ -248,7 +289,7 @@ export default function App() {
             <button 
               onClick={cycleTheme}
               className="p-1.5 rounded-lg bg-emerald-950/40 hover:bg-emerald-950/60 text-emerald-100 border border-emerald-400/30 flex items-center gap-1 text-xs transition-all active:scale-95"
-              title={`Current Theme: ${theme.toUpperCase()}`}
+              title={`Theme: ${theme.toUpperCase()}`}
             >
               {theme === 'dark' && <Moon className="w-4 h-4 text-emerald-300" />}
               {theme === 'light' && <Sun className="w-4 h-4 text-amber-300" />}
@@ -262,10 +303,10 @@ export default function App() {
           </div>
         </header>
 
-        {/* Main Body Content */}
+        {/* Main Content Area */}
         <main className="p-4 flex-1">
 
-          {/* TAB 1: HOME */}
+          {/* TAB 1: UPLOAD & HOME */}
           {activeTab === 'home' && (
             <div className="space-y-4">
               <div className={`p-5 rounded-2xl border text-center space-y-4 mt-2 shadow-lg transition-colors ${
@@ -276,7 +317,7 @@ export default function App() {
                 </div>
                 <div>
                   <h2 className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Upload Portfolio Statement</h2>
-                  <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload Sharekhan PDF to analyze live NAVs & Rebalance Advice</p>
+                  <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Upload PDF statement for automated portfolio analysis & Live NAVs</p>
                 </div>
 
                 <label htmlFor="pdf-upload" className={`border-2 border-dashed transition-all rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer block ${
@@ -304,7 +345,7 @@ export default function App() {
                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 active:scale-95"
                   >
                     {loading ? (
-                      <><Loader2 className="animate-spin h-4 w-4 text-white" /> Fetching Live NAVs & Market Data...</>
+                      <><Loader2 className="animate-spin h-4 w-4 text-white" /> Fetching Live NAVs & Analyzing...</>
                     ) : (
                       <><Sparkles className="w-4 h-4 text-amber-300" /> Generate Live Report</>
                     )}
@@ -334,7 +375,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 2: ANALYSIS REPORT */}
+          {/* TAB 2: ANALYSIS DASHBOARD */}
           {activeTab === 'analysis' && (
             <div className="space-y-3.5">
               {!analysis ? (
@@ -353,7 +394,7 @@ export default function App() {
               ) : (
                 <div className="space-y-3.5 animate-in fade-in duration-300">
                   
-                  {/* USER NAME BANNER */}
+                  {/* Investor Banner */}
                   <div className={`border p-3.5 rounded-2xl flex items-center justify-between shadow-md ${
                     isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-white border-slate-200'
                   }`}>
@@ -372,7 +413,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Summary Stats */}
+                  {/* Portfolio KPI Summary */}
                   <div className="grid grid-cols-3 gap-2">
                     <div className={`border p-2.5 rounded-xl ${
                       isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-white border-slate-200'
@@ -408,7 +449,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* BLOCK 1: Strategy Overview */}
+                  {/* Strategy Overview */}
                   {analysis.replacementOverview && (
                     <div className={`border rounded-xl p-3.5 ${
                       isDark ? 'bg-emerald-950/20 border-emerald-500/30' : 'bg-emerald-50/70 border-emerald-200'
@@ -424,7 +465,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* BLOCK 2: Smart Portfolio Rebalancing Advice */}
+                  {/* Rebalancing Strategy Advice */}
                   {analysis.rebalancingStrategy && (
                     <div className={`border rounded-2xl p-3.5 space-y-2.5 ${
                       isDark ? 'bg-slate-900/90 border-amber-500/30' : 'bg-amber-50/40 border-amber-200'
@@ -465,11 +506,11 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* Holdings List */}
+                  {/* Fund Holdings List */}
                   <div className="space-y-2.5 pt-1">
                     <h3 className={`text-xs font-bold px-1 ${
                       isDark ? 'text-slate-300' : 'text-slate-700'
-                    }`}>Holdings & Replacement Recommendations</h3>
+                    }`}>Holdings & Live NAV Calculations</h3>
 
                     {analysis.funds?.map((fund, index) => {
                       const isReplace = fund.action?.toUpperCase().includes('REBALANCE') || 
@@ -489,9 +530,9 @@ export default function App() {
                               }`}>{fund.name}</h4>
                             </div>
 
-                            {/* UPDATED IMPACT BADGE LOGIC */}
+                            {/* Status Impact Badge Driven Purely by Deterministic JS Logic */}
                             {(() => {
-                              const impactVal = fund.impact?.toLowerCase() || '';
+                              const impactVal = fund.impact?.toLowerCase() || 'stable';
                               let badgeStyle = 'bg-slate-500/20 text-slate-500 border-slate-500/30';
                               let ImpactIcon = ArrowRightLeft;
 
@@ -512,17 +553,19 @@ export default function App() {
                             })()}
                           </div>
 
-                          {/* 3 Column Grid for Invested, Live NAV, and Current Value */}
+                          {/* Data Matrix with Live NAV */}
                           <div className={`grid grid-cols-3 gap-1.5 text-[10px] p-2 rounded-lg ${
                             isDark ? 'bg-slate-950/60' : 'bg-slate-50'
                           }`}>
                             <div>
-                              <span className={`text-[8px] block ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>PDF Invested</span>
+                              <span className={`text-[8px] block ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Invested</span>
                               <span className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{fund.pdfValue}</span>
                             </div>
                             <div>
                               <span className={`text-[8px] block ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Live NAV</span>
-                              <span className="font-semibold text-emerald-600 dark:text-emerald-400">₹{fund.liveNav}</span>
+                              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                {fund.liveNav !== 'N/A' ? `₹${fund.liveNav}` : 'N/A'}
+                              </span>
                               {fund.date && (
                                 <span className={`text-[7px] font-medium block ${isDark ? 'text-emerald-400/70' : 'text-emerald-600/80'}`}>
                                   ({fund.date})
@@ -537,7 +580,7 @@ export default function App() {
                             </div>
                           </div>
 
-                          {/* Action Badge & Recommended Alternative Fund */}
+                          {/* Action Badge & Recommended Fund */}
                           <div className="space-y-1.5">
                             <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded border ${
                               isReplace 
@@ -547,7 +590,6 @@ export default function App() {
                               {isReplace ? '🔄 ' : '✅ '}{fund.action}
                             </span>
 
-                            {/* TARGET REBALANCE FUND SUGGESTION */}
                             {isReplace && fund.suggestedTargetFund && (
                               <div className={`p-2 rounded-lg border text-[11px] space-y-0.5 ${
                                 isDark ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-200' : 'bg-emerald-50 border-emerald-300 text-emerald-900'
@@ -580,7 +622,7 @@ export default function App() {
 
         </main>
 
-        {/* Bottom Navigation Bar */}
+        {/* Bottom Navigation */}
         <footer className={`fixed bottom-0 left-0 right-0 z-50 backdrop-blur-md border-t p-2.5 flex justify-around items-center max-w-lg mx-auto transition-colors ${
           isDark ? 'bg-slate-900/95 border-slate-800' : 'bg-white/95 border-slate-200'
         }`}>
